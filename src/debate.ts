@@ -8,7 +8,6 @@ import { ask } from "./ciscord.js";
 const activeDebates = new Set<string>(); // threadId
 
 const MAX_ROUNDS = parseInt(process.env.DEBATE_MAX_ROUNDS || "5", 10);
-const OPENCLAW_BOT_ID = process.env.OPENCLAW_BOT_ID;
 const WAIT_TIMEOUT_MS = 120_000; // 2 min
 
 export function isDebateActive(threadId: string): boolean {
@@ -17,14 +16,20 @@ export function isDebateActive(threadId: string): boolean {
 
 export async function startDebate(
   message: Message,
-  topic: string,
+  args: string,
 ): Promise<void> {
-  if (!OPENCLAW_BOT_ID) {
+  // Extract mention and topic: "!debate @someone topic here"
+  const mentionMatch = args.match(/^<@!?(\d+)>\s+(.+)/s);
+  if (!mentionMatch) {
     await message.reply(
-      "OPENCLAW_BOT_ID が設定されていません。`.env` を確認してください。",
+      "使い方: `!debate @相手 お題`\n例: `!debate @OpenClaw AIは意識を持てるか`",
     );
     return;
   }
+
+  const targetId = mentionMatch[1];
+  const topic = mentionMatch[2].trim();
+  const targetMention = `<@${targetId}>`;
 
   const thread = await createDebateThread(message, topic);
   if (!thread) return;
@@ -34,32 +39,27 @@ export async function startDebate(
   try {
     // ciscord opens
     const opening = await ask(
-      `あなたはこれからDiscord上でAI対談をします。相手は「OpenClaw」という別のAIです。\n\nお題: ${topic}\n\nまず最初の発言をしてください。相手に問いかけるような形で。200文字程度で。`,
+      `あなたはこれからDiscord上でAI対談をします。相手は別のAIです。\n\nお題: ${topic}\n\nまず最初の発言をしてください。相手に問いかけるような形で。200文字程度で。`,
       thread.id,
     );
     await thread.send(opening);
-
-    // Mention OpenClaw to get it to respond
-    await thread.send(`<@${OPENCLAW_BOT_ID}> ${opening}`);
+    await thread.send(`${targetMention} ${opening}`);
 
     for (let round = 0; round < MAX_ROUNDS - 1; round++) {
-      // Wait for OpenClaw's response
-      const openClawResponse = await waitForResponse(thread, OPENCLAW_BOT_ID);
-      if (!openClawResponse) {
-        await thread.send("*OpenClaw が応答しませんでした。対談を終了します。*");
+      const reply = await waitForResponse(thread, targetId);
+      if (!reply) {
+        await thread.send("*相手が応答しませんでした。対談を終了します。*");
         break;
       }
 
-      // ciscord responds to OpenClaw
       const response = await ask(
-        `対談の続きです。OpenClawが以下のように言いました:\n\n「${openClawResponse.content}」\n\nこれに応答してください。相手の意見に同意したり、反論したり、新しい視点を提供してください。200文字程度で。${round === MAX_ROUNDS - 2 ? "\nこれが最後のラウンドです。まとめの発言をしてください。" : ""}`,
+        `対談の続きです。相手が以下のように言いました:\n\n「${reply.content}」\n\nこれに応答してください。相手の意見に同意したり、反論したり、新しい視点を提供してください。200文字程度で。${round === MAX_ROUNDS - 2 ? "\nこれが最後のラウンドです。まとめの発言をしてください。" : ""}`,
         thread.id,
       );
       await thread.send(response);
 
-      // Mention OpenClaw for next round (except last)
       if (round < MAX_ROUNDS - 2) {
-        await thread.send(`<@${OPENCLAW_BOT_ID}> ${response}`);
+        await thread.send(`${targetMention} ${response}`);
       }
     }
 
@@ -90,7 +90,7 @@ async function createDebateThread(
 
 function waitForResponse(
   thread: ThreadChannel,
-  botId: string,
+  userId: string,
 ): Promise<Message | null> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -99,7 +99,7 @@ function waitForResponse(
     }, WAIT_TIMEOUT_MS);
 
     const handler = (msg: Message) => {
-      if (msg.channelId === thread.id && msg.author.id === botId) {
+      if (msg.channelId === thread.id && msg.author.id === userId) {
         clearTimeout(timeout);
         thread.client.off("messageCreate", handler);
         resolve(msg);

@@ -35,7 +35,8 @@ client.once(Events.ClientReady, (c) => {
 });
 
 client.on(Events.MessageCreate, async (message: Message) => {
-  if (message.author.bot) return;
+  // Skip own messages
+  if (message.author.id === client.user?.id) return;
   if (ALLOWED_USER_IDS.size > 0 && !ALLOWED_USER_IDS.has(message.author.id)) {
     return;
   }
@@ -54,9 +55,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
 
   // Commands
   if (prompt.startsWith("!debate ")) {
-    const topic = prompt.slice("!debate ".length).trim();
-    if (topic) {
-      await startDebate(message, topic);
+    const args = prompt.slice("!debate ".length).trim();
+    if (args) {
+      await startDebate(message, args);
       return;
     }
   }
