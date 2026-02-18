@@ -99,10 +99,10 @@ client.on(Events.MessageCreate, async (message: Message) => {
   try {
     const result = await ask(prompt, threadId);
     const finalText = truncateForDiscord(result);
-    await message.reply(finalText || "応答を生成できませんでした。");
+    await (message.channel as any).send(finalText || "応答を生成できませんでした。");
   } catch (error) {
     console.error("Error:", error);
-    await message.reply(`エラーが発生しました: ${error}`).catch(() => {});
+    await (message.channel as any).send(`エラーが発生しました: ${error}`).catch(() => {});
   } finally {
     clearInterval(typingInterval);
   }
