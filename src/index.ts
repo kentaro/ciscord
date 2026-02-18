@@ -5,6 +5,7 @@ import {
   GatewayIntentBits,
   Partials,
   type Message,
+  type TextBasedChannel,
 } from "discord.js";
 import { ask, clearSession, summarize } from "./ciscord.js";
 import { startDebate, isDebateActive } from "./debate.js";
@@ -26,8 +27,10 @@ type ChannelMemory = {
 };
 
 const channelHistory = new Map<string, ChannelMemory>();
+const backfilledChannels = new Set<string>();
 const COMPACTION_THRESHOLD = 30;
 const COMPACT_COUNT = 20;
+const BACKFILL_LIMIT = 50;
 
 function getOrCreateMemory(channelId: string): ChannelMemory {
   let memory = channelHistory.get(channelId);
@@ -81,6 +84,40 @@ function getHistory(channelId: string): string {
   return parts.join("\n\n");
 }
 
+async function backfillFromChannel(
+  channelId: string,
+  channel: TextBasedChannel,
+  botId: string,
+): Promise<void> {
+  if (backfilledChannels.has(channelId)) return;
+  backfilledChannels.add(channelId);
+
+  try {
+    const fetched = await channel.messages.fetch({ limit: BACKFILL_LIMIT });
+    // fetched is newest-first, reverse to chronological order
+    const messages = [...fetched.values()].reverse();
+    const memory = getOrCreateMemory(channelId);
+
+    for (const msg of messages) {
+      if (msg.author.id === botId) {
+        memory.recent.push(`ciscord: ${msg.content}`);
+      } else {
+        memory.recent.push(`${msg.author.displayName}: ${msg.content}`);
+      }
+    }
+
+    console.log(
+      `[backfill] channelId=${channelId} loaded=${messages.length} messages`,
+    );
+
+    if (memory.recent.length >= COMPACTION_THRESHOLD) {
+      triggerCompaction(channelId, memory);
+    }
+  } catch (err) {
+    console.error(`[backfill] channelId=${channelId} error:`, err);
+  }
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -102,6 +139,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
   const channelId = message.channel.isThread()
     ? message.channel.id
     : message.channelId;
+
+  // Backfill channel history on first access after startup
+  await backfillFromChannel(channelId, message.channel as TextBasedChannel, client.user!.id);
 
   // Record all messages from allowed users
   if (ALLOWED_USER_IDS.size === 0 || ALLOWED_USER_IDS.has(message.author.id)) {
@@ -138,6 +178,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
   if (prompt === "!clear") {
     clearSession(channelId);
     channelHistory.delete(channelId);
+    backfilledChannels.delete(channelId);
     await (message.channel as any).send("セッションをクリアしました。");
     return;
   }
