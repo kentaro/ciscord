@@ -6,7 +6,7 @@ import {
   Partials,
   type Message,
 } from "discord.js";
-import { ask, clearSession } from "./ciscord.js";
+import { ask, clearSession, summarize } from "./ciscord.js";
 import { startDebate, isDebateActive } from "./debate.js";
 import { handleReaction } from "./reactions.js";
 
@@ -20,23 +20,65 @@ const ALLOWED_USER_IDS = new Set(
   (process.env.ALLOWED_USER_IDS || "").split(",").filter(Boolean),
 );
 
-// Channel history buffer: channelId -> messages[]
-const channelHistory = new Map<string, string[]>();
-const MAX_HISTORY = 50;
+type ChannelMemory = {
+  summary: string;
+  recent: string[];
+};
+
+const channelHistory = new Map<string, ChannelMemory>();
+const COMPACTION_THRESHOLD = 30;
+const COMPACT_COUNT = 20;
+
+function getOrCreateMemory(channelId: string): ChannelMemory {
+  let memory = channelHistory.get(channelId);
+  if (!memory) {
+    memory = { summary: "", recent: [] };
+    channelHistory.set(channelId, memory);
+  }
+  return memory;
+}
 
 function recordMessage(channelId: string, author: string, content: string) {
-  if (!channelHistory.has(channelId)) {
-    channelHistory.set(channelId, []);
-  }
-  const history = channelHistory.get(channelId)!;
-  history.push(`${author}: ${content}`);
-  if (history.length > MAX_HISTORY) {
-    history.splice(0, history.length - MAX_HISTORY);
+  const memory = getOrCreateMemory(channelId);
+  memory.recent.push(`${author}: ${content}`);
+
+  if (memory.recent.length >= COMPACTION_THRESHOLD) {
+    triggerCompaction(channelId, memory);
   }
 }
 
+function triggerCompaction(channelId: string, memory: ChannelMemory) {
+  const messagesToCompact = memory.recent.splice(0, COMPACT_COUNT);
+  console.log(
+    `[compaction] channelId=${channelId} compacting=${messagesToCompact.length} remaining=${memory.recent.length}`,
+  );
+
+  summarize(memory.summary, messagesToCompact)
+    .then((newSummary) => {
+      memory.summary = newSummary;
+      console.log(
+        `[compaction] channelId=${channelId} done summary=${newSummary.length} chars`,
+      );
+    })
+    .catch((err) => {
+      console.error(`[compaction] channelId=${channelId} error:`, err);
+      // Restore messages on failure so we don't lose them
+      memory.recent.unshift(...messagesToCompact);
+    });
+}
+
 function getHistory(channelId: string): string {
-  return (channelHistory.get(channelId) || []).join("\n");
+  const memory = channelHistory.get(channelId);
+  if (!memory) return "";
+
+  const parts: string[] = [];
+  if (memory.summary) {
+    parts.push(`[これまでの要約]\n${memory.summary}`);
+  }
+  if (memory.recent.length > 0) {
+    parts.push(`[直近の会話]\n${memory.recent.join("\n")}`);
+  }
+  return parts.join("\n\n");
 }
 
 const client = new Client({
@@ -121,7 +163,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
   try {
     const history = getHistory(channelId);
     const fullPrompt = history
-      ? `[チャンネルの直近の会話]\n${history}\n\n[あなたへの質問]\n${prompt}`
+      ? `${history}\n\n[あなたへの質問]\n${prompt}`
       : prompt;
 
     const result = await ask(fullPrompt, channelId);

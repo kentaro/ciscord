@@ -74,3 +74,45 @@ export async function ask(
 export function clearSession(threadId: string): boolean {
   return sessions.delete(threadId);
 }
+
+export async function summarize(
+  existingSummary: string,
+  messages: string[],
+): Promise<string> {
+  const messagesText = messages.join("\n");
+  const prompt = existingSummary
+    ? `以下はDiscordチャンネルの会話ログです。重要な情報・決定事項・文脈を保持しつつ、簡潔に要約してください。
+
+[既存の要約]
+${existingSummary}
+
+[新しい会話]
+${messagesText}`
+    : `以下はDiscordチャンネルの会話ログです。重要な情報・決定事項・文脈を保持しつつ、簡潔に要約してください。
+
+[会話]
+${messagesText}`;
+
+  const q = query({
+    prompt,
+    options: {
+      model: "claude-haiku-4-5-20251001",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      tools: [],
+      systemPrompt:
+        "あなたは会話ログの要約を行うアシスタントです。重要な情報・決定事項・文脈を保持しつつ、簡潔に日本語で要約してください。要約のみを出力し、余計な前置きは不要です。",
+      maxTurns: 1,
+      thinking: { type: "disabled" },
+    },
+  });
+
+  let result = "";
+  for await (const message of q) {
+    if (message.type === "result" && message.subtype === "success") {
+      result = (message as SDKResultSuccess).result;
+    }
+  }
+
+  return result;
+}
