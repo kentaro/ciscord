@@ -1,0 +1,135 @@
+import "dotenv/config";
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Partials,
+  type Message,
+} from "discord.js";
+import { ask, clearSession } from "./ciscord.js";
+import { startDebate, isDebateActive } from "./debate.js";
+import { handleReaction } from "./reactions.js";
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+if (!DISCORD_TOKEN) {
+  console.error("DISCORD_TOKEN is required");
+  process.exit(1);
+}
+
+const ALLOWED_USER_IDS = new Set(
+  (process.env.ALLOWED_USER_IDS || "").split(",").filter(Boolean),
+);
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
+  ],
+  partials: [Partials.Message, Partials.Reaction],
+});
+
+client.once(Events.ClientReady, (c) => {
+  console.log(`Logged in as ${c.user.tag}`);
+});
+
+client.on(Events.MessageCreate, async (message: Message) => {
+  if (message.author.bot) return;
+  if (ALLOWED_USER_IDS.size > 0 && !ALLOWED_USER_IDS.has(message.author.id)) {
+    return;
+  }
+
+  const botMention = `<@${client.user?.id}>`;
+  const content = message.content.trim();
+
+  // Only respond to mentions or DMs
+  const isDM = !message.guild;
+  const isMentioned = content.includes(botMention);
+  if (!isDM && !isMentioned) return;
+
+  // Strip mention from content
+  const prompt = content.replace(botMention, "").trim();
+  if (!prompt) return;
+
+  // Commands
+  if (prompt.startsWith("!debate ")) {
+    const topic = prompt.slice("!debate ".length).trim();
+    if (topic) {
+      await startDebate(message, topic);
+      return;
+    }
+  }
+
+  if (prompt === "!clear") {
+    const threadId = message.channel.isThread()
+      ? message.channel.id
+      : message.channelId;
+    clearSession(threadId);
+    await message.reply("セッションをクリアしました。");
+    return;
+  }
+
+  // Skip if this thread has an active debate
+  if (
+    message.channel.isThread() &&
+    isDebateActive(message.channel.id)
+  ) {
+    return;
+  }
+
+  // Determine thread context
+  const threadId = message.channel.isThread()
+    ? message.channel.id
+    : message.channelId;
+
+  // Typing indicator
+  const channel = message.channel;
+  const sendTyping = () => {
+    if ("sendTyping" in channel) {
+      (channel as any).sendTyping().catch(() => {});
+    }
+  };
+  const typingInterval = setInterval(sendTyping, 5000);
+  sendTyping();
+
+  try {
+    const reply = await message.reply("*考え中...*");
+    let lastEdit = Date.now();
+
+    const result = await ask(prompt, threadId, async (chunk, done) => {
+      const now = Date.now();
+      if (done || now - lastEdit > 2000) {
+        const text = truncateForDiscord(chunk);
+        await reply.edit(text || "*処理中...*").catch(() => {});
+        lastEdit = now;
+      }
+    });
+
+    const finalText = truncateForDiscord(result);
+    await reply.edit(finalText || "応答を生成できませんでした。");
+  } catch (error) {
+    console.error("Error:", error);
+    await message.reply(`エラーが発生しました: ${error}`).catch(() => {});
+  } finally {
+    clearInterval(typingInterval);
+  }
+});
+
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (user.partial) {
+    try {
+      await user.fetch();
+    } catch {
+      return;
+    }
+  }
+  await handleReaction(reaction, user as any, ALLOWED_USER_IDS);
+});
+
+function truncateForDiscord(text: string): string {
+  if (text.length <= 2000) return text;
+  return text.slice(0, 1997) + "...";
+}
+
+client.login(DISCORD_TOKEN);
