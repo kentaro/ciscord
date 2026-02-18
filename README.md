@@ -6,7 +6,7 @@
 
 ### AI対談モード
 
-`@ciscord !debate AIは意識を持てるか` のようにお題を投げると、スレッドを作成して別の AI Bot（OpenClaw など）と自動で対談を始める。交互にメンションし合いながら数ラウンドの議論を繰り広げる。
+`@ciscord !debate @OpenClaw AIは意識を持てるか` のように対戦相手とお題を投げると、スレッドを作成して自動で対談を始める。交互にメンションし合いながら数ラウンドの議論を繰り広げる。
 
 ### リアクション駆動
 
@@ -58,13 +58,10 @@ DISCORD_TOKEN=your-discord-bot-token
 # 応答を許可するユーザーID（カンマ区切り、空なら全員に応答）
 ALLOWED_USER_IDS=
 
-# 認証（どちらか一方）
-ANTHROPIC_API_KEY=sk-ant-...
-# or
-CLAUDE_CODE_OAUTH_TOKEN=oauth-token
+# Claude（任意。未設定なら Claude Code の認証をそのまま使う）
+# ANTHROPIC_API_KEY=sk-ant-...
 
-# AI対談モード（任意）
-OPENCLAW_BOT_ID=openclaw-bot-user-id
+# AI対談モード
 DEBATE_MAX_ROUNDS=5
 ```
 
@@ -95,9 +92,9 @@ npm start
 ## 使い方
 
 ```
-@ciscord こんにちは              # 普通に会話
-@ciscord !debate 自由意志とは     # AI対談モードを開始
-@ciscord !clear                  # セッションをリセット
+@ciscord こんにちは                       # 普通に会話
+@ciscord !debate @OpenClaw 自由意志とは    # AI対談モードを開始
+@ciscord !clear                           # セッションをリセット
 ```
 
 リアクションはメッセージに絵文字を付けるだけ。
@@ -113,6 +110,10 @@ nvm install 22
 
 # arch が arm64 であることを確認
 node -e "console.log(process.arch)"  # arm64
+
+# Claude Code をインストールして認証
+npm install -g @anthropic-ai/claude-code
+claude login
 
 # あとは通常通り
 npm install && npm run build && npm start
