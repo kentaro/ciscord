@@ -1,8 +1,12 @@
-import { query, type SDKMessage, type SDKResultSuccess } from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKResultSuccess } from "@anthropic-ai/claude-agent-sdk";
 
 const sessions = new Map<string, string>(); // threadId -> sessionId
 
 export type StreamCallback = (chunk: string, done: boolean) => Promise<void>;
+
+const SYSTEM_PROMPT = `You are ciscord, a helpful Discord bot powered by Claude.
+Keep responses concise and formatted for Discord markdown.
+Max 1900 chars per response. Reply in the same language the user writes in.`;
 
 export async function ask(
   prompt: string,
@@ -10,6 +14,8 @@ export async function ask(
   onStream?: StreamCallback,
 ): Promise<string> {
   const existingSessionId = sessions.get(threadId);
+  const start = Date.now();
+  console.log(`[ask] prompt="${prompt.slice(0, 80)}" thread=${threadId} resume=${!!existingSessionId}`);
 
   const q = query({
     prompt,
@@ -18,15 +24,10 @@ export async function ask(
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: [],
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append:
-          "You are ciscord, a helpful Discord bot. Keep responses concise and formatted for Discord (use markdown). Max 1900 chars per response.",
-      },
+      systemPrompt: SYSTEM_PROMPT,
       ...(existingSessionId ? { resume: existingSessionId } : {}),
       includePartialMessages: !!onStream,
-      maxTurns: 3,
+      maxTurns: 1,
       thinking: { type: "disabled" },
     },
   });
@@ -66,6 +67,7 @@ export async function ask(
     await onStream(result || streamBuffer, true);
   }
 
+  console.log(`[ask] done in ${Date.now() - start}ms, result=${result.length} chars`);
   return result;
 }
 

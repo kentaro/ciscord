@@ -53,6 +53,8 @@ client.on(Events.MessageCreate, async (message: Message) => {
   const prompt = content.replace(botMention, "").trim();
   if (!prompt) return;
 
+  console.log(`[msg] from=${message.author.tag} prompt="${prompt.slice(0, 80)}"`);
+
   // Commands
   if (prompt.startsWith("!debate ")) {
     const args = prompt.slice("!debate ".length).trim();
