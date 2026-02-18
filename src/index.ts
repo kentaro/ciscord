@@ -97,20 +97,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
   sendTyping();
 
   try {
-    const reply = await message.reply("*考え中...*");
-    let lastEdit = Date.now();
-
-    const result = await ask(prompt, threadId, async (chunk, done) => {
-      const now = Date.now();
-      if (done || now - lastEdit > 2000) {
-        const text = truncateForDiscord(chunk);
-        await reply.edit(text || "*処理中...*").catch(() => {});
-        lastEdit = now;
-      }
-    });
-
+    const result = await ask(prompt, threadId);
     const finalText = truncateForDiscord(result);
-    await reply.edit(finalText || "応答を生成できませんでした。");
+    await message.reply(finalText || "応答を生成できませんでした。");
   } catch (error) {
     console.error("Error:", error);
     await message.reply(`エラーが発生しました: ${error}`).catch(() => {});
