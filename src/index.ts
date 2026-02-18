@@ -97,7 +97,13 @@ client.on(Events.MessageCreate, async (message: Message) => {
   sendTyping();
 
   try {
-    const result = await ask(prompt, threadId);
+    // Fetch recent channel history as context
+    const history = await fetchHistory(message);
+    const fullPrompt = history
+      ? `[チャンネルの直近の会話]\n${history}\n\n[あなたへの質問]\n${prompt}`
+      : prompt;
+
+    const result = await ask(fullPrompt, threadId);
     const finalText = truncateForDiscord(result);
     await (message.channel as any).send(finalText || "応答を生成できませんでした。");
   } catch (error) {
@@ -118,6 +124,20 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   }
   await handleReaction(reaction, user as any, ALLOWED_USER_IDS);
 });
+
+async function fetchHistory(message: Message): Promise<string> {
+  try {
+    const channel = message.channel;
+    if (!("messages" in channel)) return "";
+    const messages = await channel.messages.fetch({ limit: 20, before: message.id });
+    return [...messages.values()]
+      .reverse()
+      .map((m) => `${m.author.displayName}: ${m.content}`)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
 
 function truncateForDiscord(text: string): string {
   if (text.length <= 2000) return text;
